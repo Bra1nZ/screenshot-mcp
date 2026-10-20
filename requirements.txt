@@ -1,1 +1,2 @@
-mcp>=1.29
+# FastMCP из mcp 1.x; в 2.x его переименовали в MCPServer (см. migration guide)
+mcp>=1.29,<2

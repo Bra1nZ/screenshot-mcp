@@ -5,7 +5,7 @@ description = "MCP server for KDE Plasma 6 / Wayland: agent-driven terminal wind
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
-dependencies = ["mcp>=1.29"]
+dependencies = ["mcp>=1.29,<2"]
 
 [project.urls]
 Repository = "https://github.com/Bra1nZ/screenshot-mcp"
