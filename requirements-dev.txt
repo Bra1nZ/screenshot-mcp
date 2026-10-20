@@ -1,0 +1,4 @@
+-r requirements.txt
+ruff==0.16.4
+pytest>=8.0
+markdown==3.7
