@@ -23,7 +23,7 @@ jobs:
       - name: Install ruff
         run: pip install ruff==0.16.4
       - name: Lint
-        run: ruff check server.py session.py bridge.py desktop.py dbus_reporter.py tests/ tools/
+        run: ruff check server.py screenshot_mcp/ tests/ tools/
 
   import-check:
     runs-on: ubuntu-latest
@@ -36,3 +36,5 @@ jobs:
         run: pip install -r requirements.txt
       - name: Import server
         run: python -c "import asyncio, server; print(len(asyncio.run(server.mcp.list_tools())), 'tools registered')"
+      - name: Unit tests
+        run: python tests/test_backends.py

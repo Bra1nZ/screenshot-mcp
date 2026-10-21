@@ -1,8 +1,7 @@
 # screenshot-mcp
 
-MCP-сервер для **KDE Plasma 6 / Wayland**: агент открывает настоящее окно консоли,
-управляет им и снимает рабочий стол штатным средством системы (Spectacle — тем же,
-что вызывается по PrintScreen).
+MCP-сервер, который даёт агенту **настоящее окно консоли** на рабочем столе
+и **снимки экрана** штатным средством системы.
 
 Ключевая сложность в том, что под Wayland не работают привычные приёмы автоматизации
 терминала: `xdotool` не вводит текст в нативные Wayland-приложения, `wmctrl` не
@@ -25,30 +24,56 @@ MCP-сервер для **KDE Plasma 6 / Wayland**: агент открывае�
 MCP-сервер (server.py)
    │  UNIX-сокет, JSON
    ▼
-bridge.py — «насос»: переливает ввод и вывод
+core/bridge.py — «насос»: переливает ввод и вывод
    │  псевдотерминал (pty)
    ▼
-bash ── запущен прямо в окне Konsole, наследует ~/.bashrc
+bash ── запущен прямо в окне терминала, наследует ~/.bashrc
 ```
 
-* Настоящий `bash` работает **внутри** окна Konsole и подхватывает пользовательский
+* Настоящий `bash` работает **внутри** окна терминала и подхватывает пользовательский
   `.bashrc`. Заголовок окна при этом неотличим от обычного (`<каталог> : bash — Konsole`).
 * Агент пишет байтами прямо в pty. Их обрабатывает tty-драйвер (отражение ввода) и
   `readline` — то есть это буквально тот же путь, что и при наборе с клавиатуры.
   Никакой эмуляции клавиш, поэтому в терминале не остаётся следов автоматизации.
 * Код возврата берётся через хук `PROMPT_COMMAND`, который пишет маркер в служебный
   файл: на экране ничего не появляется.
-* Окно поднимается на передний план KWin-скриптом: окно находится по PID процесса
-  Konsole, активация — `workspace.activeWindow = client`.
-* Снимок делает `spectacle -b -n -o <file>` — тот же бинарник, что Plasma запускает
-  по PrintScreen, поэтому картинка неотличима от сделанной вручную.
+
+## Архитектура
+
+Платформенные различия вынесены в бэкенды, ядро от них не зависит:
+
+```
+screenshot_mcp/
+├── core/            pty-мост, сессия консоли, лаунчер — POSIX, работает везде
+├── backends/
+│   ├── terminal/    konsole · xterm · gnome-terminal
+│   ├── screenshot/  spectacle · x11 · gnome
+│   └── focus/       kwin · xdo_tool · atspi · none
+├── config.py        определение окружения и пользовательские настройки
+└── runtime.py       сборка окружения, настроек и бэкендов
+```
+
+Выбор бэкендов автоматический: определяется тип сессии (`XDG_SESSION_TYPE`) и рабочее
+окружение (`XDG_CURRENT_DESKTOP`). При необходимости его можно задать явно — см.
+[Настройку](#настройка).
+
+## Поддерживаемые окружения
+
+| Окружение | Окно терминала | Снимок экрана | Поднятие окна |
+|---|---|---|---|
+| KDE Plasma 6 / Wayland | Konsole | Spectacle | KWin-скриптинг |
+| KDE Plasma / X11 | Konsole, xterm | ImageMagick, scrot, maim | xdotool |
+| GNOME / Wayland | gnome-terminal | gnome-screenshot | AT-SPI |
+| X11 (любой DE) | xterm, gnome-terminal | ImageMagick, scrot, maim | xdotool |
 
 ## Требования
 
-* KDE Plasma 6 в сессии Wayland;
-* `konsole` и `spectacle` (в Plasma 6 идут вместе с ней);
-* `qdbus6` — для скриптинга KWin;
-* Python 3.11+ и пакет `mcp`.
+* Python 3.11+ и пакет `mcp`;
+* терминал: `konsole`, `xterm` или `gnome-terminal`;
+* для снимков: `spectacle` (KDE) либо `scrot`/`maim`/`import` (X11) либо
+  `gnome-screenshot` (GNOME);
+* для поднятия окна: KWin (идёт с Plasma) либо `xdotool` на X11;
+* `dbus-python` и `PyGObject` — для приёма отчётов от KWin-скриптов и AT-SPI.
 
 Проверено на Debian 13, KDE Plasma 6.3, Wayland.
 
@@ -60,6 +85,24 @@ cd screenshot-mcp
 pip install -r requirements.txt
 ```
 
+## Настройка
+
+По умолчанию бэкенды выбираются по окружению. Если нужно указать явно, создай
+`~/.config/screenshot-mcp/config.toml`:
+
+```toml
+[terminal]
+backend = "konsole"      # konsole | xterm | gnome-terminal
+
+[screenshot]
+backend = "spectacle"    # spectacle | x11 | gnome
+
+[focus]
+backend = "kwin"         # kwin | xdo_tool | atspi | none
+```
+
+Другой путь к конфигу можно задать переменной `SCREENSHOT_MCP_CONFIG`.
+
 ## Подключение
 
 ### opencode
@@ -69,7 +112,7 @@ pip install -r requirements.txt
 ```json
 {
   "mcp": {
-    "screenshot-mcp": {
+    "desktop-console": {
       "command": ["python3", "/путь/к/screenshot-mcp/server.py"],
       "type": "local"
     }
@@ -111,17 +154,17 @@ python3 /путь/к/screenshot-mcp/server.py
 console_open(cwd="~/projects/lab")        → console_id
 console_exec(console_id, "make")          → output, exit_code
 console_exec(console_id, "ls -la build/")  → убедиться, что артефакты на месте
-desktop_screenshot(console_id=console_id)  → PNG в ~/Pictures/Screenshots + картинка в ответе
+desktop_screenshot(console_id=console_id)  → PNG в папке снимков + картинка в ответе
 ```
 
 ## Ограничения
 
-* **Только KDE Plasma 6 / Wayland.** Скриншоты и консоль работают и под X11, но
-  поднятие окна на передний план реализовано через KWin-скриптинг, то есть только
-  под KWin.
-* **Экран должен быть разблокирован.** Пока активен lock screen, KWin не отдаёт
-  снимки — это защита композитора. `desktop_screenshot` в этом случае вернёт понятное
-  сообщение.
+* **Экран должен быть разблокирован.** Пока активен lock screen, композитор не
+  отдаёт снимки — это защита KWin, а не ошибка сервера. `desktop_screenshot` в этом
+  случае вернёт понятное сообщение.
+* Под GNOME поднять окно можно не всегда: там нет скриптинга композитора, а
+  AT-SPI работает не у всех приложений. Если окно не поднялось, снимок всё равно
+  делается — просто в кадре может быть другое окно.
 * Символ табуляции в командах не поддерживается: `bash` воспринимает его как запрос
   автодополнения.
 * `console_exec` ждёт нового промпта; для долгих задач нужен `timeout`, для
@@ -134,24 +177,26 @@ desktop_screenshot(console_id=console_id)  → PNG в ~/Pictures/Screenshots + �
 изоляции: запускай его только с тем агентом, которому доверяешь, и не оставляй
 незакрытые окна консоли с активными сессиями.
 
-Скриншоты складываются в стандартную папку KDE для снимков и дублируются в
+Скриншоты складываются в стандартную папку для снимков и дублируются в
 `screenshots/` рядом с сервером — помни, что они могут содержать чувствительные
 данные с экрана.
 
 ## Тесты
 
 Тесты живые: они открывают настоящие окна и снимают настоящий экран, поэтому
-требуют запущенной сессии KDE Plasma.
+требуют запущенной графической сессии.
 
 ```bash
 pip install -r requirements-dev.txt
-python3 tests/test_bridge.py      # pty-мост: команды, вывод, код возврата
-python3 tests/test_interactive.py  # ввод в программу, ctrl+c, история
-python3 tests/test_e2e.py          # полный цикл: окно → команды → фокус → снимок
-python3 tests/test_mcp_stdio.py    # протокол MCP: список тулов и вызовы
+python3 tests/test_backends.py      # юнит-тесты: конфиг и бэкенды (GUI не нужен)
+python3 tests/test_bridge.py        # pty-мост: команды, вывод, код возврата
+python3 tests/test_interactive.py   # ввод в программу, ctrl+c, история
+python3 tests/test_e2e.py           # полный цикл: окно → команды → фокус → снимок
+python3 tests/test_agent_flow.py    # то же через настоящий MCP-протокол
+python3 tests/test_mcp_stdio.py     # протокол MCP: список тулов и вызовы
 ```
 
-В CI (`.github/workflows/ci.yml`) гоняются только линтер и проверка импорта —
+В CI (`.github/workflows/ci.yml`) гоняются линтер, юнит-тесты и проверка импорта —
 живые тесты в контейнере без композитора не запустятся.
 
 ## Лицензия

@@ -68,8 +68,8 @@ def test_backend_selection_autodetect():
 
 
 def test_terminal_argv():
-    launcher = "/tmp/launcher.sh"
-    args = ["--sock", "/tmp/sock"]
+    launcher = os.path.join(tempfile.gettempdir(), "launcher.sh")
+    args = ["--sock", os.path.join(tempfile.gettempdir(), "sock")]
     for backend in (KonsoleTerminal(), XTermTerminal(), GnomeTerminal()):
         argv = backend.spawn_argv(launcher, args, title="Заголовок")
         assert argv[0].endswith(backend.name if backend.name != "gnome-terminal" else "gnome-terminal")
@@ -80,9 +80,10 @@ def test_terminal_argv():
 
 
 def test_title_optional():
-    argv = KonsoleTerminal().spawn_argv("/tmp/l.sh", ["--sock", "/tmp/s"])
+    launcher = os.path.join(tempfile.gettempdir(), "l.sh")
+    argv = KonsoleTerminal().spawn_argv(launcher, ["--sock", "s"])
     assert "Заголовок" not in argv
-    assert "/tmp/l.sh" in argv
+    assert launcher in argv
     print("ок: заголовок необязателен")
 
 
