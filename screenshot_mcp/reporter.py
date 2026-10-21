@@ -7,12 +7,22 @@ KWin не умеет отдавать данные наружу сам, поэт
 from __future__ import annotations
 
 import contextlib
+import ctypes
+import signal
 import sys
 
 import dbus
 import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
+
+PR_SET_PDEATHSIG = 1
+
+
+def _die_with_parent() -> None:
+    """Умереть вместе с родителем: иначе репортер осиротеет после выхода сервера."""
+    with contextlib.suppress(Exception):
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
 
 DBUS_REQUEST_OK = 1
 FILE_ARG_INDEX = 1
@@ -27,6 +37,7 @@ def main() -> int:
     interface = sys.argv[INTERFACE_ARG_INDEX] if len(sys.argv) > INTERFACE_ARG_INDEX else ""
     path = sys.argv[PATH_ARG_INDEX] if len(sys.argv) > PATH_ARG_INDEX else "/"
 
+    _die_with_parent()
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()
     try:
