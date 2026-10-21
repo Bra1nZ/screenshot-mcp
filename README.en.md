@@ -66,6 +66,14 @@ see [Configuration](#configuration).
 | GNOME / Wayland | gnome-terminal | gnome-screenshot | AT-SPI |
 | X11 (any DE) | xterm, gnome-terminal | ImageMagick, scrot, maim | xdotool |
 
+> **What has been verified live:** only the **KDE Plasma / Wayland** path — that is
+> the one all tests were run against. The X11 and GNOME paths are written against
+> the documentation of the tools they use (`scrot`, `maim`, `import`, `xdotool`,
+> `gnome-screenshot`, AT-SPI) and need checking on your own hardware: the terminal
+> and the capture run through the same core backends there, but raising a window
+> relies on `xdotool` under X11 and on AT-SPI under GNOME, and their availability
+> depends on the environment.
+
 ## Requirements
 
 * Python 3.11+ and the `mcp` package;

@@ -19,6 +19,7 @@ from mcp.server.fastmcp import FastMCP, Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from screenshot_mcp import __version__  # noqa: E402
 from screenshot_mcp.backends.base import WindowTarget  # noqa: E402
 from screenshot_mcp.backends.screenshot import (  # noqa: E402
     default_screenshot_path,
@@ -28,6 +29,9 @@ from screenshot_mcp.core.session import ConsoleSession  # noqa: E402
 from screenshot_mcp.runtime import get_runtime  # noqa: E402
 
 mcp = FastMCP("screenshot-mcp", log_level="WARNING")
+# Версию пакета показываем клиенту вместо версии SDK.
+with contextlib.suppress(AttributeError):
+    mcp._mcp_server.version = __version__
 SESSIONS: dict[str, ConsoleSession] = {}
 PROJECT_SHOTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
 

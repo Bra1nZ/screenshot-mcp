@@ -66,6 +66,13 @@ screenshot_mcp/
 | GNOME / Wayland | gnome-terminal | gnome-screenshot | AT-SPI |
 | X11 (любой DE) | xterm, gnome-terminal | ImageMagick, scrot, maim | xdotool |
 
+> **Что проверено вживую:** только вариант **KDE Plasma / Wayland** — на нём прогнаны
+> все тесты. X11- и GNOME-пути написаны по документации используемых утилит
+> (`scrot`, `maim`, `import`, `xdotool`, `gnome-screenshot`, AT-SPI) и требуют
+> проверки на своём железе: терминал и снимок там работают через те же бэкенды
+> ядра, но поднятие окна в X11 завязано на `xdotool`, а в GNOME — на AT-SPI, и
+> доступность этих способов зависит от окружения.
+
 ## Требования
 
 * Python 3.11+ и пакет `mcp`;
