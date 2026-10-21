@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""desktop-console — MCP-сервер: отдельные окна консоли, ввод/вывод и снимки экрана."""
+"""screenshot-mcp — MCP-сервер: окна консоли, ввод/вывод, снимки рабочего стола.
+
+Точка входа. Вся логика — в пакете screenshot_mcp: ядро (core) и бэкенды.
+"""
 
 from __future__ import annotations
 
@@ -16,11 +19,17 @@ from mcp.server.fastmcp import FastMCP, Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import desktop
-from session import ConsoleSession
+from screenshot_mcp.backends.base import WindowTarget  # noqa: E402
+from screenshot_mcp.backends.screenshot import (  # noqa: E402
+    default_screenshot_path,
+    png_size,
+)
+from screenshot_mcp.core.session import ConsoleSession  # noqa: E402
+from screenshot_mcp.runtime import get_runtime  # noqa: E402
 
-mcp = FastMCP("desktop-console", log_level="WARNING")
+mcp = FastMCP("screenshot-mcp", log_level="WARNING")
 SESSIONS: dict[str, ConsoleSession] = {}
+PROJECT_SHOTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
 
@@ -70,6 +79,14 @@ def encode_key(key: str) -> bytes:
     raise ValueError(f"неизвестная клавиша: {key}")
 
 
+def window_target(session: ConsoleSession) -> WindowTarget:
+    return WindowTarget(
+        pid=session.terminal_pid,
+        title_hint=os.path.basename(session.cwd),
+        app_hint="konsole",
+    )
+
+
 def preview_image(path: str, max_width: int = 1280) -> Image | None:
     try:
         from PIL import Image as PILImage
@@ -99,9 +116,9 @@ def console_open(
     cols: int = 100,
     rows: int = 30,
     title: str | None = None,
-    terminal: str = "konsole",
+    terminal: str | None = None,
 ) -> dict:
-    """Открыть НОВОЕ отдельное окно консоли (Konsole) и вернуть его console_id.
+    """Открыть НОВОЕ отдельное окно консоли и вернуть его console_id.
 
     В окне запускается интерактивный bash с твоим ~/.bashrc — тот же промпт,
     цвета и алиасы, что и в обычной консоли. Команды, введённые агентом, выглядят
@@ -109,9 +126,18 @@ def console_open(
 
     cwd — рабочий каталог консоли (по умолчанию текущий каталог сервера).
     title — заголовок окна (необязательно).
-    terminal — терминал (по умолчанию konsole).
+    terminal — терминал: konsole, xterm или gnome-terminal (по умолчанию — по окружению).
     """
-    session = ConsoleSession(cwd=cwd, cols=cols, rows=rows, title=title, terminal=terminal)
+    runtime = get_runtime()
+    backend = runtime.terminal
+    if terminal:
+        from screenshot_mcp.backends import TERMINALS
+
+        factory = TERMINALS.get(terminal)
+        if factory is None:
+            raise ValueError(f"неизвестный терминал: {terminal}")
+        backend = factory()
+    session = ConsoleSession(cwd=cwd, cols=cols, rows=rows, title=title, terminal=backend)
     try:
         session.start()
     except Exception as exc:
@@ -121,7 +147,8 @@ def console_open(
     return {
         "console_id": session.id,
         "pid": session.shell_pid,
-        "konsole_pid": session.konsole_pid,
+        "terminal_pid": session.terminal_pid,
+        "terminal_backend": session.terminal_backend,
         "cwd": session.cwd,
         "cols": session.cols_actual,
         "rows": session.rows_actual,
@@ -228,17 +255,19 @@ def console_close(console_id: str) -> dict:
 
 @mcp.tool()
 def desktop_active_window() -> dict:
-    """Какое окно сейчас на переднем плане (по KWin).
+    """Какое окно сейчас на переднем плане.
 
     Нужно, чтобы убедиться, что на снимке экрана будет видна именно консоль.
     """
-    return {"active_window": desktop.active_window()}
+    runtime = get_runtime()
+    return {"active_window": runtime.focus.windows().get("active")}
 
 
 @mcp.tool()
 def desktop_list_windows() -> dict:
     """Список окон рабочего стола: заголовок, класс, pid, активное ли, координаты."""
-    return desktop.list_windows()
+    runtime = get_runtime()
+    return runtime.focus.windows()
 
 
 @mcp.tool()
@@ -247,9 +276,12 @@ def desktop_focus(console_id: str | None = None, app: str = "konsole") -> dict:
 
     Возвращает, удалось ли активировать окно и какое окно активно теперь.
     """
+    runtime = get_runtime()
     if console_id:
         session = get_session(console_id)
-        return desktop.focus_pid(session.konsole_pid, app_hint=app)
+        target = window_target(session)
+        target.app_hint = app
+        return runtime.focus.activate(target)
     return {"error": "нужен console_id"}
 
 
@@ -261,10 +293,9 @@ def desktop_screenshot(
     copy_to_project: bool = True,
     preview: bool = True,
 ) -> Any:
-    """Сделать снимок ВСЕГО рабочего стола штатным средством KDE (Spectacle — то же,
-    что вызывается по PrintScreen).
+    """Сделать снимок ВСЕГО рабочего стола штатным средством системы.
 
-    path — куда сохранить PNG (по умолчанию — стандартная папка KDE для снимков
+    path — куда сохранить PNG (по умолчанию — стандартная папка для снимков
     с именем вида 'Screenshot from 2026-10-20 23-15-42.png'). Копия также
     складывается в screenshots/ рядом с сервером.
     console_id — если задан, окно этой консоли сначала поднимается на передний
@@ -273,17 +304,43 @@ def desktop_screenshot(
     Возвращает метаданные снимка и уменьшенную копию картинки, чтобы увидеть,
     что именно попало в кадр.
     """
+    runtime = get_runtime()
     focus = None
     if console_id:
         session = get_session(console_id)
-        focus = desktop.focus_pid(session.konsole_pid, app_hint="konsole")
+        focus = runtime.focus.activate(window_target(session))
         time.sleep(0.4)
-    result = desktop.take_screenshot(path=path, delay_ms=delay_ms, copy_to_project=copy_to_project)
+
+    target = path or default_screenshot_path()
+    result = runtime.screenshot.capture(target, delay_ms=delay_ms)
     if not result.get("ok"):
         return result, None
-    result["focus"] = focus
-    result["active_window"] = desktop.active_window()
-    img = preview_image(result["path"]) if preview else None
+
+    size = png_size(target)
+    copies = []
+    if copy_to_project:
+        os.makedirs(PROJECT_SHOTS, exist_ok=True)
+        dest = os.path.join(PROJECT_SHOTS, os.path.basename(target))
+        if os.path.abspath(dest) != os.path.abspath(target):
+            try:
+                import shutil
+
+                shutil.copy2(target, dest)
+                copies.append(dest)
+            except OSError:
+                pass
+    result.update({
+        "ok": True,
+        "path": target,
+        "copies": copies,
+        "width": size[0] if size else None,
+        "height": size[1] if size else None,
+        "bytes": os.path.getsize(target) if os.path.exists(target) else None,
+        "focus": focus,
+        "active_window": runtime.focus.windows().get("active"),
+        "screenshot_backend": runtime.screenshot.name,
+    })
+    img = preview_image(target) if preview else None
     return result, img
 
 

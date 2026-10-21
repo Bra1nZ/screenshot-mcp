@@ -6,7 +6,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from session import ConsoleSession
+from screenshot_mcp.core.session import ConsoleSession
 
 session = ConsoleSession(cwd=os.path.expanduser("~"), cols=100, rows=30)
 print("starting...", flush=True)

@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Сессия консоли: pty с интерактивным bash, окно Konsole, обмен по UNIX-сокету."""
+"""Сессия консоли: pty с интерактивным bash, окно терминала, обмен по UNIX-сокету."""
 
 from __future__ import annotations
 
@@ -17,9 +16,11 @@ import threading
 import time
 import uuid
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-BRIDGE = os.path.join(HERE, "bridge.py")
-LAUNCHER = os.path.join(HERE, "console_launcher.sh")
+from screenshot_mcp.backends.base import TerminalBackend
+from screenshot_mcp.core.launcher import write_launcher
+
+PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BRIDGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bridge.py")
 MAX_BUFFER = 1 << 20
 
 
@@ -41,10 +42,14 @@ class ConsoleSession:
         rows: int = 30,
         title: str | None = None,
         shell: str | None = None,
-        terminal: str = "konsole",
+        terminal: TerminalBackend | None = None,
         runroot: str | None = None,
     ) -> None:
         ensure_session_env()
+        if terminal is None:
+            from screenshot_mcp.runtime import get_runtime
+
+            terminal = get_runtime().terminal
         self.id = uuid.uuid4().hex[:8]
         self.cwd = os.path.abspath(os.path.expanduser(cwd or os.getcwd()))
         self.cols = cols
@@ -69,7 +74,7 @@ class ConsoleSession:
         self._reader: threading.Thread | None = None
         self._konsole: subprocess.Popen | None = None
         self._shell_pid: int | None = None
-        self._konsole_pid: int | None = None
+        self._terminal_pid: int | None = None
         self._cols_actual = cols
         self._rows_actual = rows
 
@@ -79,8 +84,12 @@ class ConsoleSession:
         return self._shell_pid
 
     @property
-    def konsole_pid(self) -> int | None:
-        return self._konsole_pid
+    def terminal_pid(self) -> int | None:
+        return self._terminal_pid
+
+    @property
+    def terminal_backend(self) -> str:
+        return self.terminal.name if self.terminal else "unknown"
 
     @property
     def cols_actual(self) -> int:
@@ -115,6 +124,8 @@ class ConsoleSession:
 
     # ---------- запуск ----------
     def start(self, timeout: float = 25.0) -> ConsoleSession:
+        if self.terminal is None:
+            raise RuntimeError("не выбран бэкенд терминала")
         if os.path.exists(self.sock_path):
             os.unlink(self.sock_path)
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -123,11 +134,10 @@ class ConsoleSession:
         listener.settimeout(timeout)
         self._listener = listener
 
-        cmd = [self.terminal, "--separate"]
-        if self.title:
-            cmd += ["--title", self.title]
-        cmd += [
-            "-e", "/bin/bash", LAUNCHER,
+        launcher = write_launcher(
+            os.path.join(self.workdir, "launcher.sh"), sys.executable, PACKAGE_ROOT, BRIDGE
+        )
+        args = [
             "--sock", self.sock_path,
             "--workdir", self.workdir,
             "--cwd", self.cwd,
@@ -135,6 +145,8 @@ class ConsoleSession:
             "--cols", str(self.cols),
             "--rows", str(self.rows),
         ]
+        cmd = self.terminal.spawn_argv(launcher, args, title=self.title)
+
         env = dict(os.environ)
         env["MCP_PYTHON"] = sys.executable
         self._konsole = subprocess.Popen(
@@ -142,7 +154,7 @@ class ConsoleSession:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        self._konsole_pid = self._konsole.pid
+        self._terminal_pid = self._konsole.pid
 
         conn, _ = listener.accept()
         conn.settimeout(None)
@@ -270,7 +282,8 @@ class ConsoleSession:
         return {
             "console_id": self.id,
             "pid": self.shell_pid,
-            "konsole_pid": self.konsole_pid,
+            "terminal_pid": self.terminal_pid,
+            "terminal_backend": self.terminal_backend,
             "cwd": self.cwd,
             "cols": self.cols_actual,
             "rows": self.rows_actual,
@@ -287,13 +300,11 @@ class ConsoleSession:
                 self._send({"t": "close"})
         time.sleep(0.15)
         if self._konsole is not None and self._konsole.poll() is None:
-            try:
+            with contextlib.suppress(OSError):
                 self._konsole.terminate()
                 time.sleep(0.3)
                 if self._konsole.poll() is None:
                     self._konsole.kill()
-            except OSError:
-                pass
         for sock in (self._conn, self._listener):
             if sock is not None:
                 with contextlib.suppress(OSError):
