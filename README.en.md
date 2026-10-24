@@ -1,5 +1,7 @@
 # screenshot-mcp
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/bra1nz-screenshot-mcp-lu0ifo?v=a8c11c8ec45a47f3884007bc35a86db3)](https://m8ven.ai/mcp/bra1nz-screenshot-mcp-lu0ifo?s=readme)
+
 An MCP server that gives an agent a **real terminal window** on the desktop and
 **screen captures** taken with the system's own screenshot tool.
 

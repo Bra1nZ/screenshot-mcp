@@ -1,5 +1,7 @@
 # screenshot-mcp
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/bra1nz-screenshot-mcp-lu0ifo?v=a8c11c8ec45a47f3884007bc35a86db3)](https://m8ven.ai/mcp/bra1nz-screenshot-mcp-lu0ifo?s=readme)
+
 MCP-сервер, который даёт агенту **настоящее окно консоли** на рабочем столе
 и **снимки экрана** штатным средством системы.
 
